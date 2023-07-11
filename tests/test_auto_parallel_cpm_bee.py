@@ -179,7 +179,9 @@ def test_cpm_bee_cell():
                                  full_batch=True, enable_parallel_optimizer=True)
 
     init("hccl")
-
+    dp = 1
+    mp = 4
+    var_single_batch_size *= dp
     fake_dataset = get_simple_dataset_from_bindata(var_single_batch_size, 256, 64, 2)
 
     dataset = GeneratorDataset(fake_dataset, ["inputs", "inputs_sub", "length", "context",
