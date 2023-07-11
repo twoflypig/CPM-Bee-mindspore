@@ -106,7 +106,16 @@ class CPMBee(nn.Cell):
             dtype=config.dtype,
         )
 
-        self.logical_and = ops.LogicalAnd()
+        self.seg_log_and = ops.LogicalAnd()
+        self.seg_rel_log_and = ops.LogicalAnd()
+        self.sample_mask_or = ops.BitwiseOr()
+
+        self.att_logit_or = ops.LogicalOr()
+        self.att_logit_and = ops.LogicalAnd()
+        self.att_mask_and = ops.LogicalAnd()
+        self.att_mask_and2 = ops.LogicalAnd()
+        self.log_and = ops.LogicalAnd()
+        self.att_1d_mask_and = ops.LogicalAnd()
 
     def construct(
         self,
@@ -128,29 +137,29 @@ class CPMBee(nn.Cell):
         # processing masks and position bias bucket
 
         # calc segment bucket
-        segment_rel_2d = masked_fill(
+        segment_rel_2d = ops.masked_fill(
             segment[:, :, None] * num_segments[:, :, None]
             + segment[:, None, :]
             + segment_rel_offset[:, :, None],
             ~(
-                self.logical_and(
+                self.seg_rel_log_and(
                 (sample_ids[:, :, None] == sample_ids[:, None, :]),
                 (span[:, None, :] == span[:, :, None]))
             ),  # not in the same span or sample
             0,  # avoid torch.gather overflow
         ).view((batch, seqlen * seqlen))
 
-        # segment_bucket = ops.gather_elements(
-        #     input=segment_rel,
-        #     dim=1,
-        #     index=segment_rel_2d.astype(mstype.int32),
-        # ).view((batch, seqlen, seqlen))
-        segment_bucket = ops.ones((batch, seqlen, seqlen), mstype.int32)
+        segment_bucket = ops.gather_elements(
+            input=segment_rel,
+            dim=1,
+            index=segment_rel_2d.astype(mstype.int32),
+        ).view((batch, seqlen, seqlen))
+
 
         segment_bucket = masked_fill(
             segment_bucket,
             ~(
-                self.logical_and((sample_ids[:, :, None] == sample_ids[:, None, :]),
+                self.seg_log_and((sample_ids[:, :, None] == sample_ids[:, None, :]),
                 (span[:, None, :] == span[:, :, None]))
             ),  # not in the same span or sample
             1,  # bucket is used for in-context samples
@@ -159,19 +168,19 @@ class CPMBee(nn.Cell):
         # directional mask
         directional_mask_2d = ops.arange(seqlen) <= ops.arange(seqlen).view((-1, 1))
         # sample mask
-        sample_mask_2d = ops.bitwise_or((sample_ids[:, :, None] == 0).astype(mstype.int32),
-            (sample_ids[:, :, None] == sample_ids[:, None, :]).astype(mstype.int32)
-        ).astype(mstype.bool_)
+        sample_mask_2d = self.sample_mask_or((sample_ids[:, :, None] == 0).to(mstype.int32),
+            (sample_ids[:, :, None] == sample_ids[:, None, :]).to(mstype.int32)
+        ).to(mstype.bool_)
 
         # context mask
-        attention_mask = ops.logical_or(context[:, None, :], 
-            (self.logical_and(ops.logical_not(context[:, :, None]),
+        attention_mask = self.att_logit_or(context[:, None, :],
+            (self.att_logit_and(ops.logical_not(context[:, :, None]),
                             directional_mask_2d.view((1, seqlen, seqlen)))
         ))
         # span mask
         attention_mask = (
-            attention_mask.astype(mstype.int32) & sample_mask_2d.astype(mstype.int32) & \
-                            (span[:, None, :] == span[:, :, None]).astype(mstype.int32)
+            attention_mask.to(mstype.int32) & sample_mask_2d.to(mstype.int32) & \
+                            (span[:, None, :] == span[:, :, None]).to(mstype.int32)
         )
         # length mask
         mask_1d = (
@@ -179,8 +188,8 @@ class CPMBee(nn.Cell):
         )
 
         mask_1d_and = self.logical_and(mask_1d.view((batch, seqlen, 1)), mask_1d.view((batch, 1, seqlen)))
-        attention_mask = mask_1d_and.astype(mstype.int32) & attention_mask
-
+        attention_mask = mask_1d_and.to(mstype.int32) & attention_mask
+        attention_mask = attention_mask.to(mstype.bool_)
         position = ops.arange(seqlen, dtype=mstype.int32).broadcast_to((batch, seqlen))
 
         position = ops.stop_gradient(position)
@@ -197,10 +206,41 @@ class CPMBee(nn.Cell):
 
         return logits, hidden_states
 
+    @staticmethod
+    def prepare_data(
+            input,
+            input_sub,
+            length,
+            context,
+            sample_ids,
+            num_segments,
+            segment,
+            segment_rel_offset,
+            segment_rel,
+            span,
+            ext_table_ids,
+            ext_table_sub,
+            label
+    ):
+        return_list = [input, input_sub, length, context, sample_ids, num_segments, segment, segment_rel_offset,
+                       segment_rel, span, ext_table_ids, ext_table_sub, label]
+        return tuple(Tensor(i) for i in return_list)
+
     def shard(self, dp, mp):
         self.input_embedding.shard(dp, mp)
         self.encoder.shard(dp, mp)
-        self.logical_and.shard(((1, 1, 1), (1, 1, 1)))
+
+        self.seg_log_and.shard(((1, 1, 1), (1, 1, 1), ))
+        self.seg_rel_log_and.shard(((1, 1, 1), (1, 1, 1),))
+        self.sample_mask_or.shard(((1, 1, 1), (1, 1, 1),))
+
+        self.att_logit_or.shard(((1, 1, 1), (1, 1, 1),))
+        self.att_logit_and.shard(((1, 1, 1), (1, 1, 1),))
+        self.att_mask_and.shard(((1, 1, 1), (1, 1, 1),))
+
+        self.att_mask_and2.shard(((1, 1, 1), (1, 1, 1),))
+        self.log_and.shard(((1, 1, 1), (1, 1, 1),))
+        self.att_1d_mask_and.shard(((1, 1, 1), (1, 1, 1),))
 
 
 class BeeForward(nn.Cell):

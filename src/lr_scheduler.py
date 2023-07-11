@@ -2,6 +2,9 @@ import mindspore
 from mindspore import ops
 from mindspore.nn.learning_rate_schedule import LearningRateSchedule
 
+import mindspore.common.dtype as mstype
+
+
 class Noam(LearningRateSchedule):
     def __init__(self, start_lr, warmup_iter, end_iter):
         super().__init__()
@@ -10,10 +13,11 @@ class Noam(LearningRateSchedule):
         self.end_iter = end_iter
 
     def get_lr_warmup(self, num_iter):
-        return self.start_lr / ops.sqrt(ops.scalar_to_tensor(self.warmup_iter)) * num_iter / self.warmup_iter
-    
+        return self.start_lr / ops.sqrt(
+            ops.scalar_to_tensor(self.warmup_iter, dtype=mstype.float32)) * num_iter / self.warmup_iter
+
     def get_lr_decay(self, num_iter):
-        return self.start_lr / ops.sqrt(num_iter)
+        return self.start_lr / ops.sqrt(num_iter.to(mstype.float32))
 
     def construct(self, global_step):
         if global_step < self.warmup_iter:

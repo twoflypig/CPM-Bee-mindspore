@@ -30,6 +30,6 @@ class LayerNorm(nn.Cell):
         """  # noqa: E501
         assert x.shape[-1] == self.dim_norm
         old_dtype = x.dtype
-        variance = x.astype(mstype.float32).pow(2).mean(axis=-1, keep_dims=True)
+        variance = ops.square(x.to(mstype.float32)).mean(axis=-1, keep_dims=True)
         x = (x * ops.rsqrt(variance + self.eps)).astype(old_dtype)
         return x * self.weight

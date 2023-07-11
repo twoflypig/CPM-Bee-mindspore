@@ -116,7 +116,8 @@ class EmbeddingExt(nn.Cell):
         """  # noqa: E501
         x_shape = x.shape
         x = x.reshape((-1, x_shape[-1]))
-        logits = self.matmul(x / ops.sqrt(ops.scalar_to_tensor(self.dim_model, x.dtype)), self.weight.swapaxes(0, 1))
+        inputs = x / ops.sqrt(ops.scalar_to_tensor(self.dim_model, x.dtype))
+        logits = self.matmul(inputs.to(self.weight.dtype), self.weight.swapaxes(0, 1))
         if ext_table is not None:
             logits_ext = ops.matmul(x, ext_table.swapaxes(0, 1))
             logits = ops.cat([logits, logits_ext], axis=-1)
@@ -127,6 +128,6 @@ class EmbeddingExt(nn.Cell):
         return logits
 
     def shard(self, dp, mp):
-        self.gather.shard(((1, 1), (1,)))
-        self.gather_2d.shard(((1, 1), (1, 1)))
-        self.matmul.shard(((dp, 1), (1, mp)))
+        self.gather.shard(((dp * mp, 1), (1,)))
+        self.gather_2d.shard(((dp * mp, 1), (1, 1)))
+        self.matmul.shard(((dp, mp), (dp, mp)))
