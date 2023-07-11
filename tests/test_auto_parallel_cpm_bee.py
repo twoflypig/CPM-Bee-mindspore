@@ -13,7 +13,7 @@ from src.data_converter import save_mindrecord
 from src.lr_scheduler import Noam
 
 
-def get_simple_dataset_from_bindasta(batch, seqlen, exe_table_size, step_per_epoch):
+def get_simple_dataset_from_bindata(batch, seqlen, exe_table_size, step_per_epoch):
     """
 
     """
@@ -69,7 +69,7 @@ def get_simple_dataset_from_bindasta(batch, seqlen, exe_table_size, step_per_epo
                 # (ext_table_size) int32
                 batch['target']
             )
-
+    return generate
 
 def get_dataset(dataset_path, batch_size=32, max_length=2048, max_depth=8):
     dataset = MindDataset(dataset_path, ["inputs", "inputs_sub", "length", "context",
@@ -180,7 +180,7 @@ def test_cpm_bee_cell():
 
     init("hccl")
 
-    fake_dataset = get_simple_dataset_from_bindasta(var_single_batch_size, 256, 64, 2)
+    fake_dataset = get_simple_dataset_from_bindata(var_single_batch_size, 256, 64, 2)
 
     dataset = GeneratorDataset(fake_dataset, ["inputs", "inputs_sub", "length", "context",
                                                        "sample_ids", "num_segments", "segment", "segment_rel_offset",
