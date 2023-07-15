@@ -24,13 +24,12 @@ from .position_embedding import RotaryEmbedding
 
 class Embedding(nn.Cell):
     def __init__(
-        self,
-        vocab_size: int,
-        embedding_size: int,
-        dtype: mstype.float_ = mstype.half,
-        param_init: Union[str, Initializer] = 'normal',
+            self,
+            vocab_size: int,
+            embedding_size: int,
+            dtype: mstype.float_ = mstype.half,
+            param_init: Union[str, Initializer] = 'normal',
     ):
-
         super().__init__()
 
         self.dim_model = embedding_size
@@ -65,12 +64,12 @@ class Embedding(nn.Cell):
 
 class EmbeddingExt(nn.Cell):
     def __init__(
-        self,
-        vocab_size: int,
-        embedding_size: int,
-        distance_scale: int = 16,
-        dtype: mstype.float_ = mstype.half,
-        param_init: Union[str, Initializer] = 'normal',
+            self,
+            vocab_size: int,
+            embedding_size: int,
+            distance_scale: int = 16,
+            dtype: mstype.float_ = mstype.half,
+            param_init: Union[str, Initializer] = 'normal',
     ):
 
         super().__init__()
@@ -85,11 +84,13 @@ class EmbeddingExt(nn.Cell):
             initializer(param_init, (vocab_size, embedding_size), dtype=dtype),
             'weight'
         )
-        self.weight.parallel_optimizer = False
+        self.weight.parallel_optimizer = True
 
         self.gather = ops.Gather()
         self.gather_2d = ops.Gather()
-        self.matmul = ops.MatMul()
+        self.matmul = ops.MatMul(transpose_b=True)
+        self.matmul_2 = ops.MatMul(transpose_b=True)
+        self.cat = ops.Concat(axis=-1)
 
     def construct(self, ids: Tensor, ids_sub: Tensor):
         """
@@ -100,9 +101,11 @@ class EmbeddingExt(nn.Cell):
             :obj:`Tensor` of shape ``(batch_size, seq_len, embedding_size)``: The embedding output.
         """  # noqa: E501
         if ids.ndim > 1:
-            embeds = self.gather_2d(self.weight, ids, 0) / ops.sqrt(ops.scalar_to_tensor(self.dim_model, self.weight.dtype))
+            embeds = self.gather_2d(self.weight, ids, 0) / ops.sqrt(
+                ops.scalar_to_tensor(self.dim_model, self.weight.dtype))
         else:
-            embeds = self.gather(self.weight, ids, 0) / ops.sqrt(ops.scalar_to_tensor(self.dim_model, self.weight.dtype))
+            embeds = self.gather(self.weight, ids, 0) / ops.sqrt(
+                ops.scalar_to_tensor(self.dim_model, self.weight.dtype))
         return self.rotary_emb(embeds, ids_sub)
 
     def projection(self, x: Tensor, ext_table: Optional[Tensor] = None):
@@ -117,17 +120,18 @@ class EmbeddingExt(nn.Cell):
         x_shape = x.shape
         x = x.reshape((-1, x_shape[-1]))
         inputs = x / ops.sqrt(ops.scalar_to_tensor(self.dim_model, x.dtype))
-        logits = self.matmul(inputs.to(self.weight.dtype), self.weight.swapaxes(0, 1))
+        logits = self.matmul(inputs.to(self.weight.dtype), self.weight)
         if ext_table is not None:
-            logits_ext = ops.matmul(x, ext_table.swapaxes(0, 1))
-            logits = ops.cat([logits, logits_ext], axis=-1)
-            logits = logits.reshape(x_shape[:-1] + (self.vocab_size + ext_table.shape[0],))
+            logits_ext = self.matmul_2(x, ext_table)
+            logits = self.cat([logits, logits_ext])
+            logits = ops.reshape(logits, x_shape[:-1] + (self.vocab_size + ext_table.shape[0],))
         else:
-            logits = logits.reshape(x_shape[:-1] + (self.vocab_size,))
+            logits = ops.reshape(logits, x_shape[:-1] + (self.vocab_size,))
 
         return logits
 
     def shard(self, dp, mp):
         self.gather.shard(((dp * mp, 1), (1,)))
         self.gather_2d.shard(((dp * mp, 1), (1, 1)))
-        self.matmul.shard(((dp, mp), (dp, mp)))
+        self.matmul.shard(((1, 1), (dp * mp, 1))) # keep same strategy with gather
+        self.rotary_emb.shard(dp, mp)
