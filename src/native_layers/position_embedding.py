@@ -221,6 +221,10 @@ class RotaryEmbedding(nn.Cell):
         self.distance_scale = distance_scale
         self.dtype = dtype
         self.inv_freq = Tensor(inv_freq, dtype)
+        self.cat = ops.Concat(axis=-1)
+        self.cat_3d = ops.Concat(axis=-1)
+        self.add = ops.Add()
+        self.add_3d = ops.Add()
         self.cos_mul = ops.Mul().shard(((1, 4), (1, 4)))
         self.sin_mul = ops.Mul().shard(((1, 4), (1, 4)))
         self.cos_mul_3d = ops.Mul().shard(((1, 1, 4), (1, 1, 4)))
@@ -241,12 +245,12 @@ class RotaryEmbedding(nn.Cell):
         emb_cos = ops.cos(emb)  # (..., dim)
         emb_sin = ops.sin(emb)  # (..., dim)
 
-        rotate_x = ops.cat(
-            [-x[..., x.shape[-1] // 2 :], x[..., : x.shape[-1] // 2]], axis=-1
-        )  # (..., dim)
-
         if len(x.shape) > 2:
-            return self.cos_mul_3d(x, emb_cos) + self.sin_mul_3d(rotate_x, emb_sin)
+            rotate_x = self.cat_3d(
+                [-x[..., x.shape[-1] // 2 :], x[..., : x.shape[-1] // 2]])  # (..., dim)
+            return self.add_3d(self.cos_mul_3d(x, emb_cos), self.sin_mul_3d(rotate_x, emb_sin))
         else:
-            return self.cos_mul(x,  emb_cos) + self.sin_mul(rotate_x,  emb_sin)
+            rotate_x = self.cat(
+                [-x[..., x.shape[-1] // 2:], x[..., : x.shape[-1] // 2]])  # (..., dim)
+            return self.add(self.cos_mul(x, emb_cos), self.sin_mul(rotate_x, emb_sin))
 

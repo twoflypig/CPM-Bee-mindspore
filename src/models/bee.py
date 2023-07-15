@@ -189,7 +189,6 @@ class CPMBee(nn.Cell):
 
         mask_1d_and = self.log_and(mask_1d.view((batch, seqlen, 1)), mask_1d.view((batch, 1, seqlen)))
         attention_mask = mask_1d_and.to(mstype.int32) & attention_mask
-        attention_mask = attention_mask.to(mstype.bool_)
         position = ops.arange(seqlen, dtype=mstype.int32).broadcast_to((batch, seqlen))
 
         position = ops.stop_gradient(position)
@@ -230,25 +229,13 @@ class CPMBee(nn.Cell):
         self.input_embedding.shard(dp, mp)
         self.encoder.shard(dp, mp)
 
-        self.seg_log_and.shard(((1, 1, 1), (1, 1, 1),))
-        self.seg_rel_log_and.shard(((1, 1, 1), (1, 1, 1),))
-        self.sample_mask_or.shard(((1, 1, 1), (1, 1, 1),))
-
-        self.att_logit_or.shard(((1, 1, 1), (1, 1, 1),))
-        self.att_logit_and.shard(((1, 1, 1), (1, 1, 1),))
-        self.att_mask_and.shard(((1, 1, 1), (1, 1, 1),))
-
-        self.att_mask_and2.shard(((1, 1, 1), (1, 1, 1),))
-        self.log_and.shard(((1, 1, 1), (1, 1, 1),))
-        self.att_1d_mask_and.shard(((1, 1, 1), (1, 1, 1),))
-
 
 class BeeForward(nn.Cell):
     def __init__(self, config):
         super().__init__()
         self.model = CPMBee(config)
-        # self.loss_fn = nn.SoftmaxCrossEntropyWithLogits(True, 'mean')
-        self.loss_fn = nn.CrossEntropyLoss(ignore_index=-100)
+        self.loss_fn = nn.SoftmaxCrossEntropyWithLogits(True, 'none')
+        # self.loss_fn = nn.CrossEntropyLoss(ignore_index=-100)
 
     def construct(
             self,
@@ -277,6 +264,8 @@ class BeeForward(nn.Cell):
 
     def shard(self, dp, mp):
         self.model.shard(dp, mp)
+        self.loss_fn.softmax_cross_entropy.shard(((dp, 1), (dp, 1)))
+        self.loss_fn.sparse_softmax_cross_entropy.shard(((dp, 1), (dp, 1)))
 
 
 from mindspore.nn.wrap.loss_scale import _grad_scale
