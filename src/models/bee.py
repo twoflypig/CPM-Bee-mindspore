@@ -235,6 +235,7 @@ class CPMBee(nn.Cell):
 
 class DefineSoftmaxCrossEntropyWithLogits(nn.Cell):
     def __init__(self, sparse=False):
+        super(DefineSoftmaxCrossEntropyWithLogits, self).__init__()
         self.sparse = sparse
         self.loss_fun = nn.SoftmaxCrossEntropyWithLogits(sparse=self.sparse)
 

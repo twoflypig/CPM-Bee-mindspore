@@ -199,10 +199,12 @@ cpm_2b_config = {
 def test_cpm_bee_cell():
     var_single_batch_size = 1
     ms.set_context(mode=ms.GRAPH_MODE, device_target="Ascend")
+    ms.set_context(ascend_config={"atomic_clean_policy": 1, "jit_compile": True})
     set_algo_parameters(fully_use_devices=False)
     ms.set_auto_parallel_context(parallel_mode=ms.ParallelMode.AUTO_PARALLEL, \
                                  search_mode="sharding_propagation", \
                                  full_batch=True, enable_parallel_optimizer=True)
+
 
     init("hccl")
     rank_id = get_rank()
@@ -213,13 +215,13 @@ def test_cpm_bee_cell():
     var_single_batch_size *= dp
     fake_dataset = get_simple_dataset_from_bindata(var_single_batch_size, 256, 64, 2)
 
-    dataset = GeneratorDataset(fake_dataset, ["inputs", "inputs_sub", "length", "context",
-                                              "sample_ids", "num_segments", "segment", "segment_rel_offset",
-                                              "segment_rel", "span", "ext_table_ids", "ext_table_sub",
+    dataset = GeneratorDataset(fake_dataset, ["input", "input_sub", "length", "context",
+                                              "sample_ids", "num_segments", "segment", "segment_rel",
+                                              "segment_rel_offset", "span", "ext_table_ids", "ext_table_sub",
                                               "label"], shuffle=False)
 
     dataset_path = 'path/to/train'
-    dataset_path =create_cpm_finetune_dataset(dataset_path, max_length=2048, max_depth=8, pad_len=7000, ext_pad_len=8,
+    dataset = create_cpm_finetune_dataset(dataset_path, max_length=2048, max_depth=8, pad_len=7000, ext_pad_len=8,
                                               batch_size=var_single_batch_size * dp, num_shard=device_num, shard_id=rank_id)
     dataset_size = dataset.get_dataset_size()
     logger.info("per epoch step: %s", dataset_size)

@@ -29,6 +29,7 @@ class LossCallBack(Callback):
             optimizer = cb_params.train_network.network.optimizer
         else:
             optimizer = cb_params.train_network.optimizer
+        return optimizer
 
     def on_train_step_end(self, run_context):
         cb_params = run_context.original_args()
@@ -42,7 +43,7 @@ class LossCallBack(Callback):
                     loss = output[0]
                     cond = output[1]
                     loss_scale = output[2]
-            if isinstance(output[0], ms.Tensor) and isinstance(output[0].asnumpy(), np.ndarray):
+            if isinstance(output, ms.Tensor) and isinstance(output.asnumpy(), np.ndarray):
                 loss = np.mean(output.asnumpy())
 
             cur_step_in_epoch = (cb_params.cur_step_num - 1) % cb_params.batch_num + 1

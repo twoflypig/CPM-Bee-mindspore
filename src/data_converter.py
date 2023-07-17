@@ -697,8 +697,8 @@ def save_mindrecord(dataset_path, save_path, batch_size=32, max_length=2048, max
         "segment_rel": {"type": "int32", "shape": [-1]},
         "spans": {"type": "int32", "shape": [-1]},
         "target": {"type": "int32", "shape": [-1]},
-        "ext_table_ids": {"type": "int32", "shape": [-1]},
-        "ext_table_sub": {"type": "int32", "shape": [-1]},
+        "ext_ids": {"type": "int32", "shape": [-1]},
+        "ext_sub": {"type": "int32", "shape": [-1]},
         "task_ids": {"type": "int32", "shape": [-1]},
     }
 
@@ -736,8 +736,8 @@ def save_mindrecord(dataset_path, save_path, batch_size=32, max_length=2048, max
                 "segment_rel": batch['segment_rel'][i],
                 "spans": batch['spans'][i],
                 "target": batch['target'][i],
-                "ext_table_ids": batch['ext_ids'],
-                "ext_table_sub": batch['ext_sub'],
+                "ext_ids": batch['ext_ids'],
+                "ext_sub": batch['ext_sub'],
                 "task_ids": batch['task_ids'][i],
             }
             data.append(sample)

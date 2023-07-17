@@ -120,6 +120,7 @@ class SegmentPositionEmbedding(nn.Cell):
         # )
         relative_buckets_add = is_small * relative_position.to(mstype.int32) \
                             + (1 - is_small) * relative_postion_if_large
+        relative_buckets += relative_buckets_add
         return relative_buckets
 
 
@@ -263,4 +264,4 @@ class RotaryEmbedding(nn.Cell):
 
     def shard(self, dp, mp):
         self.add.shard(((dp * mp, 1), (dp * mp, 1)))
-        self.add_3d.shard(((dp * mp, 1), (dp * mp, 1)))
+        self.add_3d.shard(((dp, mp, 1), (dp, mp, 1)))

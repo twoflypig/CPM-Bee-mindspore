@@ -2,6 +2,7 @@ import os
 import sys
 import logging
 
+
 class LOGGER(logging.Logger):
     def __init__(self, logger_name, rank=0):
         super(LOGGER, self).__init__(logger_name)
@@ -9,7 +10,7 @@ class LOGGER(logging.Logger):
         if rank % 8 == 0:
             console = logging.StreamHandler(sys.stdout)
             console.setLevel(logging.INFO)
-            formatter = logging.Formatter('%(asctime)s%(levelname)s%s(message)s')
+            formatter = logging.Formatter('%(asctime)s:%(levelname)s:%s(message)s')
             console.setFormatter(formatter)
             self.addHandler(console)
 
@@ -38,13 +39,15 @@ class LOGGER(logging.Logger):
     def important_info(self, msg, *args, **kwargs):
         if self.isEnabledFor(logging.INFO) and self.rank == 0:
             line_width = 2
-            import_msg = '\n'
-            import_msg += ('*'*70 + '\n') * line_width
-            import_msg += ('*'*line_width + '\n') * 2
-            import_msg += '*'*line_width + ' '*8 + msg + '\n'
-            import_msg += ('*'*line_width + '\n')*2
-            import_msg += ('*'*70 + '\n') * line_width
-            self.info(import_msg, *args, **kwargs)
+            important_msg = '\n'
+            important_msg += ('*' * 70 + '\n') * line_width
+            important_msg += ('*' * line_width + '\n') * 2
+            important_msg += '*' * line_width + ' ' * 8 + msg + '\n'
+            important_msg += ('*' * line_width + '\n') * 2
+            important_msg += ('*' * 70 + '\n') * line_width
+            self.info(important_msg, *args, **kwargs)
+
+
 def get_logger(path, rank):
     logger = LOGGER('CPM', rank)
     logger.setup_logging_file(os.path.join(path, 'rank__' + str(rank)))

@@ -15,6 +15,7 @@ class FineTuneDataset:
         self.max_depth = max_depth
         self.pad_length = pad_len
         self.ext_pad_length = ext_pad_len
+        self.tokenizer = CPMBeeTokenizer()
         self.data_lst = self.create_dataset_list()
 
     def create_dataset_list(self):
@@ -40,38 +41,36 @@ class FineTuneDataset:
                 break
             if batch is None:
                 continue
-            else:
-                break
 
-            inputs = batch['inputs'][0],  # (batch, seqlen) int32
-            inputs_sub = batch['inputs_sub'][0],  # (batch, seqlen) int32
-            length = batch['length'][0],  # (batch) int32
+            inputs = batch['inputs'][0]  # (batch, seqlen) int32
+            inputs_sub = batch['inputs_sub'][0]  # (batch, seqlen) int32
+            length = batch['length'][0]  # (batch) int32
 
-            context = batch['context'][0],  # (batch, seqlen) bool
-            sample_ids = batch['sample_ids'][0],  # (batch, seq_len) int32
-            num_segments = batch['num_segments'][0],  # (batch, seq_len) int32
+            context = batch['context'][0]  # (batch, seqlen) bool
+            sample_ids = batch['sample_ids'][0]  # (batch, seq_len) int32
+            num_segments = batch['num_segments'][0]  # (batch, seq_len) int32
 
-            segment_ids = batch['segment_ids'][0],  # (batch, seqlen) int32
-            segment_rel_offset = batch['segment_rel_offset'][0],  # (batch, seq_len) int32
+            segment_ids = batch['segment_ids'][0]  # (batch, seqlen) int32
+            segment_rel_offset = batch['segment_rel_offset'][0]  # (batch, seq_len) int32
 
             segment_rel = batch['segment_rel'][0]
             segment_rel_ = np.zeros(self.pad_length, dtype=np.int32)
             segment_rel_[:segment_rel.shape[0]] = segment_rel
 
             # (batch, num_segment_bucket) int32
-            spans = batch['spans'][0],  # (batch, seqlen) int32
+            spans = batch['spans'][0]  # (batch, seqlen) int32
             ext_ids = batch['ext_ids']
             ext_ids_ = np.zeros(self.ext_pad_length, dtype=np.int32)
-            ext_ids_[:ext_ids.shape[0]] = ext_ids_
+            ext_ids_[:ext_ids.shape[0]] = ext_ids
             # (ext_table_size) int32
             ext_sub = batch['ext_sub']
             ext_sub_ = np.zeros(self.ext_pad_length, dtype=np.int32)
-            exe_sub_[:ext_sub.shape[0]] = ext_sub
+            ext_sub_[:ext_sub.shape[0]] = ext_sub
             # (ext_table_size) int32
             target = batch['target'][0]
 
             data_lst.append((inputs, inputs_sub, length, context, sample_ids, num_segments, segment_ids,
-                             segment_rel_offset, segment_rel, spans, ext_ids_, ext_sub_, target))
+                             segment_rel_offset, segment_rel_, spans, ext_ids_, ext_sub_, target))
         return data_lst
 
     def __len__(self):
