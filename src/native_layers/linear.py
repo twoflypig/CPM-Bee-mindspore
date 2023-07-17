@@ -35,7 +35,7 @@ class Linear(nn.Cell):
         self.scale_before = scale_before
 
         self.weight = Parameter(initializer(param_init, (dim_out, dim_in), dtype=dtype), 'weight')
-        self.matmul = ops.MatMul()
+        self.matmul = ops.MatMul(transpose_b=True)
 
     def construct(self, x: Tensor):
         """
@@ -56,4 +56,4 @@ class Linear(nn.Cell):
         return x
 
     def shard(self, dp, mp):
-        self.matmul.shard(((dp, mp), (mp, 1)))
+        self.matmul.shard(((dp, 1), (mp, 1)))

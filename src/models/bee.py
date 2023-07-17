@@ -17,7 +17,7 @@ from typing import Optional, Tuple, List
 from typing_extensions import TypedDict
 
 import numpy as np
-
+import mindspore as ms
 from mindspore import nn, ops
 from mindspore import Tensor
 from mindspore.common import dtype as mstype
@@ -135,6 +135,8 @@ class CPMBee(nn.Cell):
     ):
         batch = input.shape[0]
         seqlen = input.shape[1]
+        ext_table_ids = ext_table_ids[0]
+        ext_table_sub = ext_table_sub[0]
         # processing masks and position bias bucket
 
         # calc segment bucket
@@ -228,14 +230,28 @@ class CPMBee(nn.Cell):
     def shard(self, dp, mp):
         self.input_embedding.shard(dp, mp)
         self.encoder.shard(dp, mp)
+        self.position_bias.shard(dp, mp)
+
+
+class DefineSoftmaxCrossEntropyWithLogits(nn.Cell):
+    def __init__(self, sparse=False):
+        self.sparse = sparse
+        self.loss_fun = nn.SoftmaxCrossEntropyWithLogits(sparse=self.sparse)
+
+    def construct(self, inputs, target, ignore_index=-100):
+        loss = self.loss_fun(inputs, target)
+        new_target = ops.where(target != ignore_index, ms.Tensor(1, dtype=ms.float32), ms.Tensor(0, dtype=ms.float32))
+        loss = ops.sum(loss * new_target) / ops.sum(new_target)
+        return loss
 
 
 class BeeForward(nn.Cell):
     def __init__(self, config):
         super().__init__()
         self.model = CPMBee(config)
-        self.loss_fn = nn.SoftmaxCrossEntropyWithLogits(True, 'none')
-        # self.loss_fn = nn.CrossEntropyLoss(ignore_index=-100)
+        # self.loss_fn = nn.SoftmaxCrossEntropyWithLogits(True, 'none')
+        self.loss_fn = DefineSoftmaxCrossEntropyWithLogits(sparse=True)
+        self.cast = ops.Cast()
 
     def construct(
             self,
@@ -258,14 +274,18 @@ class BeeForward(nn.Cell):
         logits, _ = self.model(input, input_sub, length, context, sample_ids,
                                num_segments, segment, segment_rel_offset, segment_rel, span,
                                ext_table_ids, ext_table_sub)
-        logits = logits.astype(mstype.float32)
-        loss = self.loss_fn(logits.view((-1, logits.shape[-1])), label.view(-1))
+        label = label.view(-1)
+        label = self.cast(label, ms.int32)
+
+        logits = logits.view((-1, logits.shape[-1]))
+        logits = self.cast(logits, mstype.float32)
+        loss = self.loss_fn(logits, label)
         return loss
 
     def shard(self, dp, mp):
         self.model.shard(dp, mp)
-        self.loss_fn.softmax_cross_entropy.shard(((dp, 1), (dp, 1)))
-        self.loss_fn.sparse_softmax_cross_entropy.shard(((dp, 1), (dp, 1)))
+        self.loss_fn.loss_fun.softmax_cross_entropy.shard(((dp, 1), (dp, 1)))
+        self.loss_fn.loss_fun.sparse_softmax_cross_entropy.shard(((dp, 1), (dp, 1)))
 
 
 from mindspore.nn.wrap.loss_scale import _grad_scale

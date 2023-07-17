@@ -14,13 +14,14 @@ class Noam(LearningRateSchedule):
 
     def get_lr_warmup(self, num_iter):
         return self.start_lr / ops.sqrt(
-            ops.scalar_to_tensor(self.warmup_iter, dtype=mstype.float32)) * num_iter / self.warmup_iter
+            ops.scalar_to_tensor(self.warmup_iter)) * num_iter.to(mstype.float32) / self.warmup_iter
 
     def get_lr_decay(self, num_iter):
         return self.start_lr / ops.sqrt(num_iter.to(mstype.float32))
 
     def construct(self, global_step):
-        if global_step < self.warmup_iter:
-            return self.get_lr_warmup(global_step)
+        if global_step + 1 < self.warmup_iter:
+            cur_lr = self.get_lr_warmup(global_step + 1)
         else:
-            return self.get_lr_decay(global_step)
+            cur_lr =  self.get_lr_decay(global_step + 1)
+        return cur_lr

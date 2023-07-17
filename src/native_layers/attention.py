@@ -51,6 +51,8 @@ class Attention(nn.Cell):
             self.dropout = nn.Dropout(p=dropout_p)
         else:
             self.dropout = None
+        self.matmul = ops.BatchMatMul()
+        self.matmul_2 = ops.BatchMatMul()
 
     def construct(
         self,
@@ -89,7 +91,7 @@ class Attention(nn.Cell):
             len_k = h_k.shape[-2]
 
         # (b, n_h, len_q, d_h) @ (b, n_h, d_h, len_k) -> (b, n_h, len_q, len_k)
-        score = ops.matmul(h_q, h_k.swapaxes(-1, -2)) / ops.sqrt(ops.scalar_to_tensor(self.dim_head, h_k.dtype))
+        score = self.matmul(h_q, h_k.swapaxes(-1, -2)) / ops.sqrt(ops.scalar_to_tensor(self.dim_head, h_k.dtype))
         score = score + position_bias
         score = masked_fill(
             score,
@@ -110,7 +112,7 @@ class Attention(nn.Cell):
             score = self.dropout(score)
 
         # (b, n_h, len_q, len_k) @ (b, n_h, len_k, d_h) -> (b, n_h, len_q, d_h)
-        score = ops.matmul(score, h_v)
+        score = self.matmul_2(score, h_v)
 
         score = score.view((batch_size, self.num_heads, len_q, self.dim_head)).transpose(0, 2, 1, 3)
         score = score.view((batch_size, len_q, self.num_heads * self.dim_head))

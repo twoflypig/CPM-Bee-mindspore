@@ -46,7 +46,7 @@ class Embedding(nn.Cell):
             :obj:`Tensor` of shape ``(batch_size, seq_len, embedding_size)``: The embedding output.
         """  # noqa: E501
 
-        embeds = ops.gather(self.weight, ids, 0) / ops.sqrt(ops.scalar_to_tensor(self.dim_model, self.weight.dtype))
+        embeds = ops.gather(self.weight, ids, 0) / ops.sqrt(ops.scalar_to_tensor(self.dim_model))
 
         return embeds
 
@@ -58,7 +58,7 @@ class Embedding(nn.Cell):
         Returns:
             :obj:`Tensor` of shape ``(batch, seq_len, vocab_output_size)``: The projection output.
         """  # noqa: E501
-        logits = ops.matmul(x / ops.sqrt(ops.scalar_to_tensor(self.dim_model, x.dtype)), self.weight)
+        logits = ops.matmul(x / ops.sqrt(ops.scalar_to_tensor(self.dim_model)), self.weight)
         return logits
 
 
@@ -131,7 +131,8 @@ class EmbeddingExt(nn.Cell):
         return logits
 
     def shard(self, dp, mp):
-        self.gather.shard(((dp * mp, 1), (1,)))
-        self.gather_2d.shard(((dp * mp, 1), (1, 1)))
-        self.matmul.shard(((1, 1), (dp * mp, 1))) # keep same strategy with gather
+        self.gather.shard(((1, 1), (dp,)))
+        self.gather_2d.shard(((1, 1), (dp, 1)))
+        self.matmul.shard(((dp, 1), (1, 1))) # keep same strategy with gather
+        self.matmul_2.shard(((dp, 1), (1, 1)))
         self.rotary_emb.shard(dp, mp)
