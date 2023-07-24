@@ -28,7 +28,7 @@ from mindspore.parallel._utils import _get_device_num, _get_gradients_mean
 from ..native_layers import Encoder, EmbeddingExt, BucketPositionBias, Linear, LayerNorm
 from ..utils import Config
 from ..ops import masked_fill
-from ..native_layers import clip_by_global_norm
+from ..native_layers.clip_norm import clip_by_global_norm
 
 
 class CPMBeeInferenceState(TypedDict):
@@ -75,6 +75,19 @@ class CPMBeeConfig(Config):
             self.dtype = mstype.single
         self.vocab_size = vocab_size
         self.mask_modules = mask_modules
+
+class DefineSoftmaxCrossEntropyWithLogits(nn.Cell):
+    def __init__(self, sparse=False):
+        super(DefineSoftmaxCrossEntropyWithLogits, self).__init__()
+        self.sparse = sparse
+        self.loss_fun = nn.SoftmaxCrossEntropyWithLogits(sparse=self.sparse)
+
+    def construct(self, inputs, target, ignore_index=-100):
+        loss = self.loss_fun(inputs, target)
+        new_target = ops.where(target != ignore_index, Tensor(1, dtype=mstype.float32),
+                              Tensor(0, mstype.float32))
+        loss = ops.sum(loss * new_target) / ops.sum(new_target)
+        return loss
 
 
 class CPMBee(nn.Cell):
@@ -309,10 +322,11 @@ class TrainOneStep(nn.TrainOneStepWithLossScaleCell):
         # if there is no overflow, do optimize
         if not overflow:
             if self.move_scaling_to_adam:
-                grads = clip_by_global_norm(grads, 1.0, scaling_sens)
+                grads = clip_by_global_norm(grads, scaling_sens, 1.0)
+                loss = ops.depend(loss, self.optimizer(grads, scaling_sens))
             else:
                 grads = ops.clip_by_global_norm(grads, 1.0)
-            loss = ops.depend(loss, self.optimizer(grads))
+                loss = ops.depend(loss, self.optimizer(grads))
         return loss, cond, scaling_sens
 
 

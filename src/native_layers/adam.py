@@ -16,9 +16,9 @@ from mindspore.nn.optim.adam import _adam_opt
 
 
 
-@_adam_opt.register("Tensor", "Tensor", "Tensor", "Tensor", "Tensor", "Tensor", "Tensor", "Tensor", "Tensor",
+@_adam_opt.register("Tensor", "Tensor", "Tensor", "Tensor", "Tensor", "Tensor", "Tensor", "Tensor", "Tensor", "Tensor", "Tensor",
                     "Tensor", "Bool", "Bool")
-def _update_run_op(scaling, beta1, beta2, eps, lr, weight_decay, param, m, v, gradient, decay_flag, optim_filter):
+def _update_run_op(scaling, beta1_correction, beta2_correction, beta1, beta2, eps, lr, weight_decay, param, m, v, gradient, decay_flag, optim_filter):
     op_cast = P.Cast()
     if optim_filter:
         op_mul = P.Mul()
@@ -39,7 +39,7 @@ def _update_run_op(scaling, beta1, beta2, eps, lr, weight_decay, param, m, v, gr
         next_v = op_mul(beta2, v_fp32) + op_mul(op_cast(F.tuple_to_array((1.0,)), mstype.float32)
                                                 - beta2, op_real_div(op_square(gradient_fp32), scaling))
 
-        update = next_m / (eps * scaling + op_sqrt(next_v * scaling))
+        update = next_m / beta1_correction / (eps * scaling + op_sqrt(next_v * scaling / beta2_correction))
         if decay_flag:
             update = op_mul(weight_decay, param_fp32) + update
 
@@ -58,23 +58,50 @@ class AdamWeightDecayWithScale(nn.AdamWeightDecay):
     _support_parallel_optimizer = True
 
     def __init__(self, params, learning_rate=1e-3, beta1=0.9, beta2=0.999, eps=1e-8, weight_decay=0.0):
-        super(AdamWeightDecayWithScale, self).__init__(learning_rate, params, weight_decay)
+        super(AdamWeightDecayWithScale, self).__init__(params, learning_rate=learning_rate,
+                                                       beta1=beta1,
+                                                       beta2=beta2,
+                                                       eps=eps,
+                                                       weight_decay=weight_decay)
         self.beta1 = Tensor(np.array([beta1]).astype(np.float32))
         self.beta2 = Tensor(np.array([beta2]).astype(np.float32))
         self.eps = Tensor(np.array([eps]).astype(np.float32))
         self.moments1 = self._parameters.clone(prefix="adam_m", init='zeros')
-        self.moments2 = self._parameters.clone(prefix="adam_v", init='zeros')
+        self.moments2 = self.clone_state(self.parameters, prefix='adam_v', init='zeros')
         self.fused_opt = P.AdamWeightDecay()
         if context.get_context("device_target") == "Ascend":
             self.use_fused_opt = False
         else:
             self.use_fused_opt = True
 
+    def clone_state(self, parameter_tuple, prefix, init):
+        r"""
+            parameter_tuple: ParameterTuple. The parameters of the network
+            prefix: str. The prefix name of the parameters
+            init: str. The initialization method
+        """
+        new = []
+        for old_param in parameter_tuple:
+            new_state = Parameter(initializer(init, shape=old_param.shape, dtype=mstype.float32))
+            new_state.param_info = old_param.param_info.clone()
+            if hasattr(old_param.param_info, "cloned_obj"):
+                old_param.param_info.cloned_obj.append(new_state)
+            else:
+                old_param.param_info.cloned_obj = [new_state]
+            new_state.is_init = False
+            new_state.set_data(initializer(init, shape=old_param.shape, dtype=mstype.float32))
+            new_state.name = prefix + '.' + new_state.name
+            new.append(new_state)
+        return ParameterTuple(new)
+
+
     @jit
     def construct(self, gradients, scaling):
         gradients = self.flatten_gradients(gradients)
         weight_decay = self.get_weight_decay()
         lr = self.get_lr()
+        bias1_correction = 1.0 - P.pow(self.beta1, self.global_step + 1)
+        bias2_correction = 1.0 - P.pow(self.beta2, self.global_step + 1)
 
         if self.is_group:
             if self.is_group_lr:
@@ -86,7 +113,8 @@ class AdamWeightDecayWithScale(nn.AdamWeightDecay):
                                                 weight_decay, self._parameters, self.moments1, self.moments2,
                                                 gradients, self.decay_flags, self.optim_filter)
         else:
-            optim_result = self.hyper_map(F.partial(_adam_opt, scaling, self.beta1, self.beta2, self.eps, lr, weight_decay),
+            optim_result = self.hyper_map(F.partial(_adam_opt, scaling, bias1_correction, bias2_correction,
+                                            self.beta1, self.beta2, self.eps, lr, weight_decay),
                                             self._parameters, self.moments1, self.moments2,
                                             gradients, self.decay_flags, self.optim_filter)
         if self.use_parallel:

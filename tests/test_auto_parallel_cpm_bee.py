@@ -1,4 +1,7 @@
 import os
+import math
+import time
+import copy
 import numpy as np
 import mindspore as ms
 from mindspore import Tensor, nn
@@ -11,10 +14,11 @@ from mindspore.parallel._utils import _get_device_num, _get_gradients_mean
 from mindspore.parallel import set_algo_parameters
 from mindspore.dataset import MindDataset, GeneratorDataset
 from mindspore.dataset.transforms import TypeCast
-from mindspore.train import Model, LossMonitor, TimeMonitor, Model
+from mindspore.train import Model
 from mindspore.amp import DynamicLossScaleManager
 from mindspore.train.callback import Callback
 import mindspore.common.dtype as mstype
+from mindspore.communication.management import get_group_size, get_rank
 
 from src.callbacks import LossCallBack
 from src.logger import get_logger
@@ -25,7 +29,9 @@ from src.data_converter import CPMBeeTokenizer
 from src.data_converter import save_mindrecord, _MixedDatasetSaver, _MixedDatasetConfig
 from mindspore.context import _Context
 from src.lr_scheduler import Noam
-from src.native_layers import AdamWeightDecayWithScale
+from src.native_layers.adam import AdamWeightDecayWithScale
+
+from src.create_cpm_dataset import create_cpm_finetune_dataset, create_minrecord_dataset
 
 
 
@@ -60,18 +66,18 @@ class LossCallBack(Callback):
             date = time.asctime(time.localtime(time.time()))
 
             cur_time = time.time()
-            cost_time = cur_time - self._time()
+            cost_time = cur_time - self._time
 
             loss_value = 'no loss for this stage'
             if cb_params.net_outputs[1].asnumpy() is False:
                 self.step += 1
-            if self.ir:
-                lr = self.rate(Tensor(np.array(self.step)))
+            if self.lr:
+                lr = self.lr(Tensor(np.array(self.step)))
             else:
                 lr = 0.0000
             loss_value = cb_params.net_outputs[0].asnumpy()
             loss_value = np.mean(loss_value)
-            print("time: {} local_rank: {}, epoch: {}, step: {}, loss is {}, overflow is {}, loss scale is {}, lr is {:.5f}. cost time is {:.4f}s".
+            print("time: {} local_rank: {}, epoch: {}, step: {}, loss is {}, overflow is {}, loss scale is {}, lr is {}. cost time is {:.4f} ms".
                   format(date, int(self.local_rank), int(epoch_num) + int(self.has_trained_epoch),
                          cb_params.cur_step_num + int(self.has_trained_step), loss_value,
                          cb_params.net_outputs[1].asnumpy(), cb_params.net_outputs[2].asnumpy(), lr,
@@ -248,42 +254,54 @@ cpm_2b_config = {
 def test_cpm_bee_cell():
     # move_scaling_to_adam means we use the same optimizer as in the torch
     move_scaling_to_adam = True
+    stande_alone = False
     var_single_batch_size = 1
-    ms.set_context(mode=ms.GRAPH_MODE, device_target="Ascend")
-    ms.set_auto_parallel_context(parallel_mode=ms.ParallelMode.AUTO_PARALLEL, \
-                                 search_mode="sharding_propagation", \
-                                 full_batch=True, enable_parallel_optimizer=True)
+    epoch_size = 5
 
-    init("hccl")
-    rank_id = get_rank()
-    device_num = 4
+    ms.set_context(mode=ms.GRAPH_MODE, device_target="Ascend")
+    if not stande_alone:
+        ms.set_auto_parallel_context(parallel_mode=ms.ParallelMode.AUTO_PARALLEL, \
+                                    search_mode="sharding_propagation", \
+                                    full_batch=True, enable_parallel_optimizer=True)
+        init("hccl")
+        rank = get_rank()
+        device_num = get_group_size()
+    else:
+        rank = 0
+        device_num = 1
 
     dp = 4
     mp = 1
     var_single_batch_size *= dp
     fake_dataset = get_simple_dataset_from_bindata(var_single_batch_size, 256, 64, 2)
 
-    dataset = GeneratorDataset(fake_dataset, ["inputs", "inputs_sub", "length", "context",
-                                                       "sample_ids", "num_segments", "segment", "segment_rel_offset",
-                                                       "segment_rel", "span", "ext_table_ids", "ext_table_sub",
-                                                       "label"], shuffle=False)
+    dataset_path = '/home/dataset'
+
+    dataset = create_minrecord_dataset(dataset_path, batch_size=var_single_batch_size, device_num=device_num,
+                                        rank_id=rank, epoch_size=epoch_size)
+
+    # dataset = GeneratorDataset(fake_dataset, ["inputs", "inputs_sub", "length", "context",
+    #                                                    "sample_ids", "num_segments", "segment", "segment_rel_offset",
+    #                                                    "segment_rel", "span", "ext_table_ids", "ext_table_sub",
+    #                                                    "label"], shuffle=False)
 
     config = CPMBeeConfig(**cpm_2b_config)
     model = BeeForward(config)
-    model.shard(dp, mp)
+    if not stande_alone:
+        model.shard(device_num, 1)
 
     if model is not None:
         print(f"total parameters is {count_params(model)} M", flush=True)
 
     lr_scheduler = Noam(1e-4, 1, 2000)
-    epoch_size = 5
+
     if move_scaling_to_adam:
         optimizer = AdamWeightDecayWithScale(model.trainable_params(), lr_scheduler, weight_decay=0.01)
     else:
         optimizer = nn.AdamWeightDecay(model.trainable_params(), lr_scheduler, weight_decay=0.01)
 
-    loss_scale_manager = DynamicLossScaleManager()
-    loss_monitor = LossCallBack(lr=lr_scheduler)
+    loss_scale_manager = DynamicLossScaleManager(32768)
+    loss_monitor = LossCallBack(1, lr=lr_scheduler)
 
     train_step = TrainOneStep(model, optimizer, loss_scale_manager.get_update_cell(), move_scaling_to_adam=move_scaling_to_adam)
     trainer = Model(train_step)
