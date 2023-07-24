@@ -48,9 +48,9 @@ class Linear(nn.Cell):
         x = x.astype(self.weight.dtype)
         if self.scale_before:
             x = x / ops.sqrt(ops.scalar_to_tensor(self.dim_in, self.weight.dtype))
-            x = self.matmul(x.reshape(-1, x_shape[-1]), self.weight.swapaxes(0, 1))
+            x = self.matmul(x.reshape(-1, x_shape[-1]), self.weight)
         else:
-            x = self.matmul(x.reshape(-1, x_shape[-1]), self.weight.swapaxes(0, 1))
+            x = self.matmul(x.reshape(-1, x_shape[-1]), self.weight)
             x = x / ops.sqrt(ops.scalar_to_tensor(self.dim_in, self.weight.dtype))
         x = x.reshape(x_shape[:-1] + (x.shape[-1],))
         return x

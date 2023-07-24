@@ -1,38 +1,22 @@
-import os
-import math
 import time
+import math
 import copy
 import numpy as np
 import mindspore as ms
 from mindspore import Tensor, nn
+from mindspore.amp import DynamicLossScaleManager
 from mindspore.communication import init
-from mindspore import mutable
-from mindspore.common.parameter import ParameterTuple
-from mindspore.communication import init, get_rank, get_group_size
-from mindspore.communication.management import GlobalComm
-from mindspore.parallel._utils import _get_device_num, _get_gradients_mean
-from mindspore.parallel import set_algo_parameters
-from mindspore.dataset import MindDataset, GeneratorDataset
+from mindspore.communication.management import get_group_size, get_rank
+from mindspore.dataset import MindDataset
 from mindspore.dataset.transforms import TypeCast
 from mindspore.train import Model
-from mindspore.amp import DynamicLossScaleManager
 from mindspore.train.callback import Callback
-import mindspore.common.dtype as mstype
-from mindspore.communication.management import get_group_size, get_rank
 
 from src.callbacks import LossCallBack
-from src.logger import get_logger
-from src.models import CPMBeeConfig, CPMBee, BeeForward, TrainOneStep
-from src.dataset import SimpleDataset
-from src.create_cpm_dataset import create_cpm_finetune_dataset
-from src.data_converter import CPMBeeTokenizer
-from src.data_converter import save_mindrecord, _MixedDatasetSaver, _MixedDatasetConfig
-from mindspore.context import _Context
 from src.lr_scheduler import Noam
+from src.models import CPMBeeConfig, CPMBee, BeeForward, TrainOneStep
 from src.native_layers.adam import AdamWeightDecayWithScale
-
-from src.create_cpm_dataset import create_cpm_finetune_dataset, create_minrecord_dataset
-
+from src.create_cpm_dataset import create_mindrecord_dataset
 
 
 class LossCallBack(Callback):
@@ -157,7 +141,7 @@ def get_dataset(dataset_path, batch_size=32, max_length=2048, max_depth=8):
 
 from src.dataset import SimpleDataset
 from src.tokenizers import CPMBeeTokenizer
-from src.data_converter import _MixedDatasetConfig, _MixedDatasetSaver, save_mindrecord
+from src.data_converter import _MixedDatasetConfig, _MixedDatasetSaver
 
 
 def count_params(net):
@@ -254,12 +238,12 @@ cpm_2b_config = {
 def test_cpm_bee_cell():
     # move_scaling_to_adam means we use the same optimizer as in the torch
     move_scaling_to_adam = True
-    stande_alone = False
+    stand_alone = False
     var_single_batch_size = 1
     epoch_size = 5
 
     ms.set_context(mode=ms.GRAPH_MODE, device_target="Ascend")
-    if not stande_alone:
+    if not stand_alone:
         ms.set_auto_parallel_context(parallel_mode=ms.ParallelMode.AUTO_PARALLEL, \
                                     search_mode="sharding_propagation", \
                                     full_batch=True, enable_parallel_optimizer=True)
@@ -277,7 +261,7 @@ def test_cpm_bee_cell():
 
     dataset_path = '/home/dataset'
 
-    dataset = create_minrecord_dataset(dataset_path, batch_size=var_single_batch_size, device_num=device_num,
+    dataset = create_mindrecord_dataset(dataset_path, batch_size=var_single_batch_size, device_num=device_num,
                                         rank_id=rank, epoch_size=epoch_size)
 
     # dataset = GeneratorDataset(fake_dataset, ["inputs", "inputs_sub", "length", "context",
@@ -287,8 +271,8 @@ def test_cpm_bee_cell():
 
     config = CPMBeeConfig(**cpm_2b_config)
     model = BeeForward(config)
-    if not stande_alone:
-        model.shard(device_num, 1)
+    if not stand_alone:
+        model.shard(dp, mp)
 
     if model is not None:
         print(f"total parameters is {count_params(model)} M", flush=True)

@@ -8,6 +8,46 @@ from src.models import CPMBee
 from src.data_converter import _MixedDatasetSaver, _MixedDatasetConfig
 
 
+class Context2Bool:
+    def __init__(self):
+        pass
+
+    def __call__(self, context):
+        return context.astype(np.bool)
+
+
+class AdjustCol:
+    def __init__(self):
+        pass
+
+    def __call__(self, *inputs):
+        inputs, inputs_sub, length, context, sample_ids, num_segments, segment_ids, segment_rel_offset, segment_rel, \
+            spans, target, ext_ids, ext_sub = inputs
+        return inputs, inputs_sub, length, context, sample_ids, num_segments, segment_ids
+
+
+class SeqExt:
+    def __init__(self):
+        pass
+
+    def __call__(self, ext_ids, ext_sub):
+        return ext_ids[0], ext_sub[0]
+
+
+def create_mindrecord_dataset(mindrecord_file, batch_size=4, device_num=1, rank_id=0, num_parallel_workers=4, epoch_size=5):
+    columns = ['inputs', 'inputs_sub', 'length', 'context', 'sample_ids', 'num_segments', 'segment',
+               'segment_rel_offset', 'segment_rel', 'spans', 'ext_table_ids', 'ext_table_sub', 'label']
+
+    ds = de.MindDataset(mindrecord_file, columns_list=columns, num_shards=device_num, shard_id=rank_id,
+                        num_parallel_workers=num_parallel_workers, shuffle=False)
+    ds = ds.map(input_columns='context', operations=Context2Bool())
+    ds = ds.batch(batch_size, drop_remainder=True)
+
+    ds = ds.map(input_columns=['ext_table_ids', 'ext_table_sub'], operations=SeqExt())
+    ds = ds.repeat(epoch_size)
+
+    return ds
+
 class FineTuneDataset:
     def __init__(self, dataset_path, max_length=2048, max_depth=8, pad_len=7000, ext_pad_len=8):
         self.dataset_path = dataset_path
