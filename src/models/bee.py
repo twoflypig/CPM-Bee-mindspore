@@ -28,6 +28,7 @@ from mindspore.parallel._utils import _get_device_num, _get_gradients_mean
 from ..native_layers import Encoder, EmbeddingExt, BucketPositionBias, Linear, LayerNorm
 from ..utils import Config
 from ..ops import masked_fill
+from ..native_layers import clip_by_global_norm
 
 
 class CPMBeeInferenceState(TypedDict):
@@ -266,8 +267,6 @@ class BeeForward(nn.Cell):
             ext_table_sub: Tensor,  # (ext_table_size) int32
             label: Tensor
     ):
-        # ext_table_ids = ext_table_ids[0]
-        # ext_table_sub = ext_table_sub[0]
         logits, _ = self.model(input, input_sub, length, context, sample_ids,
                                num_segments, segment, segment_rel_offset, segment_rel, span,
                                ext_table_ids, ext_table_sub)
@@ -283,8 +282,9 @@ from mindspore.nn.wrap.loss_scale import _grad_scale
 
 
 class TrainOneStep(nn.TrainOneStepWithLossScaleCell):
-    def __init__(self, network, optimizer, scale_sense):
+    def __init__(self, network, optimizer, scale_sense, move_scaling_to_adam=True):
         super().__init__(network, optimizer, scale_sense)
+        self.move_scaling_to_adam = move_scaling_to_adam
 
     def construct(self, *inputs):
         weights = self.weights
@@ -294,7 +294,8 @@ class TrainOneStep(nn.TrainOneStepWithLossScaleCell):
 
         scaling_sens_filled = ops.ones_like(loss) * scaling_sens.astype(loss.dtype)
         grads = self.grad(self.network, weights)(*inputs, scaling_sens_filled)
-        grads = self.hyper_map(ops.partial(_grad_scale, scaling_sens), grads)
+        if not self.move_scaling_to_adam:
+            grads = self.hyper_map(ops.partial(_grad_scale, scaling_sens), grads)
         # apply grad reducer on grads
         grads = self.grad_reducer(grads)
 
@@ -303,7 +304,10 @@ class TrainOneStep(nn.TrainOneStepWithLossScaleCell):
         overflow = self.process_loss_scale(cond)
         # if there is no overflow, do optimize
         if not overflow:
-            grads = ops.clip_by_global_norm(grads, 1.0)
+            if self.move_scaling_to_adam:
+                grads = clip_by_global_norm(grads, 1.0, scaling_sens)
+            else:
+                grads = ops.clip_by_global_norm(grads, 1.0)
             loss = ops.depend(loss, self.optimizer(grads))
         return loss, cond, scaling_sens
 

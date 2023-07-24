@@ -1,16 +1,74 @@
 import os
+import math
+import time
+import copy
 import numpy as np
 import mindspore as ms
 from mindspore import Tensor, nn
 from mindspore.communication import init
 from mindspore.dataset import MindDataset, GeneratorDataset
 from mindspore.dataset.transforms import TypeCast
-from mindspore.train import Model, LossMonitor, TimeMonitor
+from mindspore.train import Model
 from mindspore.amp import DynamicLossScaleManager
+from mindspore.train.callback import Callback
+import mindspore.common.dtype as mstype
 
 from src.models import CPMBeeConfig, CPMBee, BeeForward, TrainOneStep
 from src.data_converter import save_mindrecord
 from src.lr_scheduler import Noam
+from src.native_layers import AdamWeightDecayWithScale
+
+
+
+class LossCallBack(Callback):
+    """
+    Monitor the loss in training.
+    If the loss in NAN or INF terminating training.
+    """
+
+    def __init__(self, dataset_size=-1, lr=None, local_rank=0, has_trained_epoch=0, has_trained_step=0):
+        super(LossCallBack, self).__init__()
+        self._dataset_size = dataset_size
+        self.local_rank = local_rank
+        self.has_trained_epoch = has_trained_epoch
+        self.has_trained_step = has_trained_step
+        self.lr = copy.deepcopy(lr)
+        self.step = 0
+
+        self._time = time.time()
+
+
+    def step_end(self, run_context):
+        """
+        Print loss after each step
+        """
+        cb_params = run_context.original_args()
+        if self._dataset_size > 0 and self.local_rank % 8 == 0:
+            percent, epoch_num = math.modf(cb_params.cur_step_num /
+                                           self._dataset_size)
+            if percent == 0:
+                epoch_num -= 1
+            date = time.asctime(time.localtime(time.time()))
+
+            cur_time = time.time()
+            cost_time = cur_time - self._time()
+
+            loss_value = 'no loss for this stage'
+            if cb_params.net_outputs[1].asnumpy() is False:
+                self.step += 1
+            if self.ir:
+                lr = self.rate(Tensor(np.array(self.step)))
+            else:
+                lr = 0.0000
+            loss_value = cb_params.net_outputs[0].asnumpy()
+            loss_value = np.mean(loss_value)
+            print("time: {} local_rank: {}, epoch: {}, step: {}, loss is {}, overflow is {}, loss scale is {}, lr is {:.5f}. cost time is {:.4f}s".
+                  format(date, int(self.local_rank), int(epoch_num) + int(self.has_trained_epoch),
+                         cb_params.cur_step_num + int(self.has_trained_step), loss_value,
+                         cb_params.net_outputs[1].asnumpy(), cb_params.net_outputs[2].asnumpy(), lr,
+                         cost_time
+                         ))
+
 
 
 def get_simple_dataset_from_bindata(batch, seqlen, exe_table_size, step_per_epoch):
@@ -172,6 +230,8 @@ cpm_2b_config = {
 
 
 def test_cpm_bee_cell():
+    # move_scaling_to_adam means we use the same optimizer as in the torch
+    move_scaling_to_adam = True
     var_single_batch_size = 1
     ms.set_context(mode=ms.GRAPH_MODE, device_target="Ascend")
     ms.set_auto_parallel_context(parallel_mode=ms.ParallelMode.AUTO_PARALLEL, \
@@ -196,13 +256,15 @@ def test_cpm_bee_cell():
 
     lr_scheduler = Noam(1e-4, 1, 2000)
     epoch_size = 5
-    optimizer = nn.AdamWeightDecay(model.trainable_params(), lr_scheduler, weight_decay=0.01)
+    if move_scaling_to_adam:
+        optimizer = AdamWeightDecayWithScale(model.trainable_params(), lr_scheduler, weight_decay=0.01)
+    else:
+        optimizer = nn.AdamWeightDecay(model.trainable_params(), lr_scheduler, weight_decay=0.01)
 
     loss_scale_manager = DynamicLossScaleManager()
-    loss_monitor = LossMonitor()
-    time_monitor = TimeMonitor()
+    loss_monitor = LossCallBack(lr=lr_scheduler)
 
-    train_step = TrainOneStep(model, optimizer, loss_scale_manager.get_update_cell())
+    train_step = TrainOneStep(model, optimizer, loss_scale_manager.get_update_cell(), move_scaling_to_adam=move_scaling_to_adam)
     trainer = Model(train_step)
 
-    trainer.train(epoch_size, dataset, callbacks=[loss_monitor, time_monitor], dataset_sink_mode=False)
+    trainer.train(epoch_size, dataset, callbacks=[loss_monitor], dataset_sink_mode=False)
