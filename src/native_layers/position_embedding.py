@@ -192,8 +192,8 @@ class BucketPositionBias(nn.Cell):
         max_exact = num_buckets // 2
         is_small = relative_position < max_exact
         relative_postion_if_large = max_exact + (
-            ops.log(relative_position.float() / max_exact)
-            / ops.log(ops.scalar_to_tensor(max_distance / max_exact))
+            ops.log(relative_position.float() / max_exact + 1e-5)
+            / ops.log(ops.scalar_to_tensor(max_distance / max_exact) + 1e-5)
             * (num_buckets - max_exact)
         ).astype(mstype.int32)
         relative_postion_if_large = ops.minimum(

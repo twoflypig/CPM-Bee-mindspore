@@ -20,7 +20,7 @@ class Noam(LearningRateSchedule):
         return self.start_lr / ops.sqrt(num_iter.to(mstype.float32))
 
     def construct(self, global_step):
-        if global_step < self.warmup_iter:
-            return self.get_lr_warmup(global_step)
+        if global_step + 1 < self.warmup_iter:
+            return self.get_lr_warmup(global_step + 1)
         else:
-            return self.get_lr_decay(global_step)
+            return self.get_lr_decay(global_step + 1)

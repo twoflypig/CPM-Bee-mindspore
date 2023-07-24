@@ -94,12 +94,10 @@ class Attention(nn.Cell):
         score = masked_fill(
             score,
             attention_mask.view((batch_size, 1, len_q, len_k)) == False,
-            float("-inf"),
+            -10000,
         )
-        score_dtype = score.dtype
-        score = score.float()
+
         score = self.softmax(score)
-        score = score.to(score_dtype)
         score = masked_fill(
             score,
             attention_mask.view((batch_size, 1, len_q, len_k)) == False,
