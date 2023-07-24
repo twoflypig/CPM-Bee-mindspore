@@ -1,13 +1,11 @@
-import numpy as np
 import mindspore as ms
 import mindspore.dataset as ds
-from mindspore import Tensor, nn, value_and_grad
-from mindspore import jit as ms_jit
-from mindspore import mutable
-from mindspore.communication import init, get_rank
-from mindspore.communication.management import GlobalComm
-from mindspore.parallel._utils import _get_device_num, _get_gradients_mean
-from src.models import CPMBee, CPMBeeConfig, CPMBeeSimple, Forward, TrainStep
+import numpy as np
+from mindspore import Tensor, nn
+from mindspore.communication import init
+
+from src.models import CPMBeeConfig, BeeForward
+
 
 def get_dataset(batch, seqlen, num_segment_bucket, ext_table_size, step_per_epoch):
     """
@@ -71,33 +69,5 @@ cpm_2b_config = {
 }
 
 
-def test_cpm_bee_cell():
-    var_single_batch_size = 1
-
-    ms.set_context(mode=ms.GRAPH_MODE, device_target="GPU", save_graphs=2, save_graphs_path="./saved_graph")
-    ms.set_auto_parallel_context(parallel_mode=ms.ParallelMode.AUTO_PARALLEL, \
-                                 search_mode="sharding_propagation", \
-                                 dataset_strategy="data_parallel", enable_parallel_optimizer=True)
-
-    init("nccl")
-
-    # 随机构造数据集
-    fake_dataset = get_simple_dataset(var_single_batch_size, 256, 64, 100)
-    dataset = ds.GeneratorDataset(fake_dataset, ["input", "input_sub", "position", "segment_bucket", "attention_mask",
-                                                 "ext_table_ids", "ext_table_sub", "label"])
-
-    config = CPMBeeConfig(**cpm_2b_config)
-    model = Forward(config)
-    model.shard(4, 1)
-
-    learning_rate = 0.001
-    epoch_size = 5
-    optimizer = nn.AdamWeightDecay(model.trainable_params(), learning_rate)
-
-    train_step = TrainStep(model, optimizer)
-
-    data_iter = dataset.create_tuple_iterator()
-    for epoch in range(epoch_size):
-        for idx, data in enumerate(data_iter):
-            loss = train_step(*data)
-            print(f"Epoch_{epoch}/Step_{idx}: Loss:{loss}.")
+if __name__ == '__main__':
+    pass

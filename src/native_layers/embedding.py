@@ -30,6 +30,7 @@ class Embedding(nn.Cell):
             dtype: mstype.float_ = mstype.half,
             param_init: Union[str, Initializer] = 'normal',
     ):
+
         super().__init__()
 
         self.dim_model = embedding_size
@@ -131,7 +132,8 @@ class EmbeddingExt(nn.Cell):
         return logits
 
     def shard(self, dp, mp):
-        self.gather.shard(((dp * mp, 1), (1,)))
-        self.gather_2d.shard(((dp * mp, 1), (1, 1)))
-        self.matmul.shard(((1, 1), (dp * mp, 1))) # keep same strategy with gather
+        self.gather.shard(((1, 1), (dp,)))
+        self.gather_2d.shard(((1, 1), (dp, 1)))
+        self.matmul.shard(((dp, 1), (1, 1))) # keep same strategy with gather
+        self.matmul_2.shard(((dp, 1), (1, 1)))
         self.rotary_emb.shard(dp, mp)

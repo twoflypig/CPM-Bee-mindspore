@@ -17,6 +17,7 @@ from mindspore.mindrecord import FileWriter
 from .dataset import DistributedDataset, SimpleDataset
 from .tokenizers import CPMBeeTokenizer
 
+
 class _MixedDatasetConfig(TypedDict):
     weight: float
     path: str
@@ -53,6 +54,7 @@ class _TransformFuncDict(TypedDict):
 
 _TransformFunction = Callable[[CPMBeeInputType, int, random.Random], CPMBeeInputType]
 
+
 class CPMBeeBatch(TypedDict):
     inputs: NDArray[np.int32]
     inputs_sub: NDArray[np.int32]
@@ -82,11 +84,11 @@ def rel_to_bucket(n_up: int, n_down: int, max_depth: int = 8):
 
 
 def convert_data_to_id(
-    tokenizer: CPMBeeTokenizer,
-    data: Any,
-    prev_ext_states: Optional[_PrevExtTableStates] = None,
-    shuffle_answer: bool = True,
-    max_depth: int = 8,
+        tokenizer: CPMBeeTokenizer,
+        data: Any,
+        prev_ext_states: Optional[_PrevExtTableStates] = None,
+        shuffle_answer: bool = True,
+        max_depth: int = 8,
 ):
     root: _DictTree = {
         "value": "<root>",
@@ -234,11 +236,11 @@ def _dataset_identity(c: _MixedDatasetConfig):
 
 class _MixedDatasetSaver:
     def __init__(
-        self,
-        batch_size: int,
-        max_length: int,
-        tokenizer: CPMBeeTokenizer,
-        max_depth: int = 16,
+            self,
+            batch_size: int,
+            max_length: int,
+            tokenizer: CPMBeeTokenizer,
+            max_depth: int = 16,
     ) -> None:
         self._batch_size = batch_size
         self._max_length = max_length
@@ -262,9 +264,9 @@ class _MixedDatasetSaver:
         return len(self._inputs)
 
     def apply_transform(
-        self,
-        data: CPMBeeInputType,
-        transform: Union[Dict[str, Any], Callable[[CPMBeeInputType], CPMBeeInputType], None],
+            self,
+            data: CPMBeeInputType,
+            transform: Union[Dict[str, Any], Callable[[CPMBeeInputType], CPMBeeInputType], None],
     ) -> CPMBeeInputType:
         if transform is None:
             return data
@@ -290,7 +292,7 @@ class _MixedDatasetSaver:
         expanded_mapping_list: List[Tuple[str, Any]] = []
 
         def _expand_mapping(
-            data: CPMBeeInputType, stars: List[str], path: List[str], target: List[str]
+                data: CPMBeeInputType, stars: List[str], path: List[str], target: List[str]
         ):
             if len(path) == 0:
                 num_stars = 0
@@ -339,17 +341,17 @@ class _MixedDatasetSaver:
         return ret
 
     def data_to_id(
-        self,
-        data: Any,
-        prev_ext_states: Optional[_PrevExtTableStates] = None,
-        shuffle_answer: bool = True,
+            self,
+            data: Any,
+            prev_ext_states: Optional[_PrevExtTableStates] = None,
+            shuffle_answer: bool = True,
     ):
         return convert_data_to_id(
             self.tokenizer, data, prev_ext_states, shuffle_answer, self._max_depth
         )
 
     def _ensure_transform_function(
-        self, module_name: str, transform_script_path: str
+            self, module_name: str, transform_script_path: str
     ) -> _TransformFunction:
         module_name = "cpm_live.transforms.{}".format(module_name)
         if transform_script_path not in self._transform_func_table:
@@ -409,6 +411,7 @@ class _MixedDatasetSaver:
             def _transform(data: CPMBeeInputType):
                 r = random.Random(seed)
                 return transform_func(data, num_incontext, r)
+
             transform = _transform
         elif len(transforms) == 0:
             transform = None
@@ -680,7 +683,8 @@ class _MixedDatasetSaver:
             return None
 
 
-def save_mindrecord(dataset_path, save_path, batch_size=32, max_length=2048, max_depth=8, shard_num=1, drop_remainder=False):
+def save_mindrecord(dataset_path, save_path, batch_size=32, max_length=2048, max_depth=8, shard_num=1,
+                    drop_remainder=False):
     nlp_schema = {
         "inputs": {"type": "int32", "shape": [-1]},
         "inputs_sub": {"type": "int32", "shape": [-1]},
@@ -688,13 +692,14 @@ def save_mindrecord(dataset_path, save_path, batch_size=32, max_length=2048, max
         "context": {"type": "int32", "shape": [-1]},
         "sample_ids": {"type": "int32", "shape": [-1]},
         "num_segments": {"type": "int32", "shape": [-1]},
-        "segment": {"type": "int32", "shape": [-1]},
+        "segment_ids": {"type": "int32", "shape": [-1]},
         "segment_rel_offset": {"type": "int32", "shape": [-1]},
         "segment_rel": {"type": "int32", "shape": [-1]},
-        "span": {"type": "int32", "shape": [-1]},
-        "ext_table_ids": {"type": "int32", "shape": [-1]},
-        "ext_table_sub": {"type": "int32", "shape": [-1]},
-        "label": {"type": "int32", "shape": [-1]},
+        "spans": {"type": "int32", "shape": [-1]},
+        "target": {"type": "int32", "shape": [-1]},
+        "ext_ids": {"type": "int32", "shape": [-1]},
+        "ext_sub": {"type": "int32", "shape": [-1]},
+        "task_ids": {"type": "int32", "shape": [-1]},
     }
 
     writer = FileWriter(save_path, shard_num=shard_num, overwrite=True)
@@ -703,19 +708,18 @@ def save_mindrecord(dataset_path, save_path, batch_size=32, max_length=2048, max
     tokenizer = CPMBeeTokenizer()
     ds = SimpleDataset(dataset_path, shuffle=False)
     packer = _MixedDatasetSaver(
-            batch_size, max_length, tokenizer, max_depth
-        )
+        batch_size, max_length, tokenizer, max_depth
+    )
     ds_cfg: _MixedDatasetConfig = {
-    "weight": 1.0,
-    "path": dataset_path,
-    "transforms": [],
-    "task_name": 'test_task',
-    "dataset_name": "finetune",
-    "incontext_weight": [1.0],
-    "lines": len(ds),
-    "dataset": ds,
+        "weight": 1.0,
+        "path": dataset_path,
+        "transforms": [],
+        "task_name": 'test_task',
+        "dataset_name": "finetune",
+        "incontext_weight": [1.0],
+        "lines": len(ds),
+        "dataset": ds,
     }
-
 
     def process_data(batch, batch_size):
         data = []
@@ -727,13 +731,14 @@ def save_mindrecord(dataset_path, save_path, batch_size=32, max_length=2048, max
                 "context": batch['context'][i],
                 "sample_ids": batch['sample_ids'][i],
                 "num_segments": batch['num_segments'][i],
-                "segment": batch['segment_ids'][i],
+                "segment_ids": batch['segment_ids'][i],
                 "segment_rel_offset": batch['segment_rel_offset'][i],
                 "segment_rel": batch['segment_rel'][i],
-                "span": batch['spans'][i],
-                "ext_table_ids": batch['ext_ids'],
-                "ext_table_sub": batch['ext_sub'],
-                "label": batch['target'][i],
+                "spans": batch['spans'][i],
+                "target": batch['target'][i],
+                "ext_ids": batch['ext_ids'],
+                "ext_sub": batch['ext_sub'],
+                "task_ids": batch['task_ids'][i],
             }
             data.append(sample)
         return data

@@ -101,6 +101,7 @@ class SelfAttentionBlock(nn.Cell):
 
     def shard(self, dp, mp):
         self.self_attention.shard(dp, mp)
+        self.layernorm_before_attention.shard(dp, mp)
 
 
 class FFNBlock(nn.Cell):
@@ -163,6 +164,7 @@ class FFNBlock(nn.Cell):
 
     def shard(self, dp, mp):
         self.ffn.shard(dp, mp)
+        self.layernorm_before_ffn.shard(dp, mp)
 
 class TransformerBlock(nn.Cell):
     """The whole transformer block. A sequence of operation. Consists of self-attention block[, cross-attention block] and feed-forward block.

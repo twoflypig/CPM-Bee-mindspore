@@ -1,20 +1,29 @@
 import os
-import math
-import time
-import copy
 import numpy as np
 import mindspore as ms
 from mindspore import Tensor, nn
 from mindspore.communication import init
+from mindspore import mutable
+from mindspore.common.parameter import ParameterTuple
+from mindspore.communication import init, get_rank, get_group_size
+from mindspore.communication.management import GlobalComm
+from mindspore.parallel._utils import _get_device_num, _get_gradients_mean
+from mindspore.parallel import set_algo_parameters
 from mindspore.dataset import MindDataset, GeneratorDataset
 from mindspore.dataset.transforms import TypeCast
-from mindspore.train import Model
+from mindspore.train import Model, LossMonitor, TimeMonitor, Model
 from mindspore.amp import DynamicLossScaleManager
 from mindspore.train.callback import Callback
 import mindspore.common.dtype as mstype
 
+from src.callbacks import LossCallBack
+from src.logger import get_logger
 from src.models import CPMBeeConfig, CPMBee, BeeForward, TrainOneStep
-from src.data_converter import save_mindrecord
+from src.dataset import SimpleDataset
+from src.create_cpm_dataset import create_cpm_finetune_dataset
+from src.data_converter import CPMBeeTokenizer
+from src.data_converter import save_mindrecord, _MixedDatasetSaver, _MixedDatasetConfig
+from mindspore.context import _Context
 from src.lr_scheduler import Noam
 from src.native_layers import AdamWeightDecayWithScale
 
@@ -145,6 +154,13 @@ from src.tokenizers import CPMBeeTokenizer
 from src.data_converter import _MixedDatasetConfig, _MixedDatasetSaver, save_mindrecord
 
 
+def count_params(net):
+    total_params = [np.prod(param.shape) for param in net.trainable_params()]
+    for param in net.trainable_params():
+        print(param)
+    return sum(total_params) // 1000000
+
+
 def get_prepare_dataset():
     dataset_path = '/mnt/code/lvyufeng/CPM-Bee/tutorials/basic_task_finetune/bin_data/train'
     ds = SimpleDataset(dataset_path, shuffle=False)
@@ -239,8 +255,11 @@ def test_cpm_bee_cell():
                                  full_batch=True, enable_parallel_optimizer=True)
 
     init("hccl")
-    dp = 1
-    mp = 4
+    rank_id = get_rank()
+    device_num = 4
+
+    dp = 4
+    mp = 1
     var_single_batch_size *= dp
     fake_dataset = get_simple_dataset_from_bindata(var_single_batch_size, 256, 64, 2)
 
@@ -251,10 +270,10 @@ def test_cpm_bee_cell():
 
     config = CPMBeeConfig(**cpm_2b_config)
     model = BeeForward(config)
-    model.shard(1, 4)
+    model.shard(dp, mp)
 
-    total = [np.prod(param.shape) for param in model.trainable_params()]
-    print('total: ', sum(total) // 1000000)
+    if model is not None:
+        print(f"total parameters is {count_params(model)} M", flush=True)
 
     lr_scheduler = Noam(1e-4, 1, 2000)
     epoch_size = 5

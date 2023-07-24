@@ -142,6 +142,8 @@ class BucketPositionBias(nn.Cell):
             initializer(param_init, (num_buckets + num_segment_bucket, num_heads), dtype=dtype),
             'relative_attention_bias'
         )
+        self.equal = ops.Equal()
+        self.sub = ops.Sub()
 
     def construct(
         self,
@@ -161,7 +163,7 @@ class BucketPositionBias(nn.Cell):
             and rel_buckets.shape[2] == keylen
         )
 
-        relative_position_bucket = rel_buckets - 1 + self.num_buckets  # 与相对位置编码区间不重叠
+        relative_position_bucket = self.sub(rel_buckets, 1 - self.num_buckets)  # 与相对位置编码区间不重叠
 
         # b*q*k
         inner_segment_bucket = self._position_bucket(
@@ -170,7 +172,7 @@ class BucketPositionBias(nn.Cell):
             max_distance=self.max_distance,
         )
         relative_position_bucket = ops.where(
-            rel_buckets == 0,
+            self.equal(rel_buckets, 0),
             inner_segment_bucket,
             relative_position_bucket,
         )
@@ -205,6 +207,9 @@ class BucketPositionBias(nn.Cell):
         )
         return relative_buckets
 
+    def shard(self, dp, mp):
+        self.equal.shard(((dp * mp, 1, 1), ()))
+        self.sub.shard(((dp * mp, 1, 1), ()))
 
 class RotaryEmbedding(nn.Cell):
     def __init__(
@@ -225,10 +230,10 @@ class RotaryEmbedding(nn.Cell):
         self.cat_3d = ops.Concat(axis=-1)
         self.add = ops.Add()
         self.add_3d = ops.Add()
-        self.cos_mul = ops.Mul().shard(((1, 4), (1, 4)))
-        self.sin_mul = ops.Mul().shard(((1, 4), (1, 4)))
-        self.cos_mul_3d = ops.Mul().shard(((1, 1, 4), (1, 1, 4)))
-        self.sin_mul_3d = ops.Mul().shard(((1, 1, 4), (1, 1, 4)))
+        self.cos_mul = ops.Mul()
+        self.sin_mul = ops.Mul()
+        self.cos_mul_3d = ops.Mul()
+        self.sin_mul_3d = ops.Mul()
 
 
     def construct(self, x: Tensor, x_pos: Tensor):
@@ -254,3 +259,6 @@ class RotaryEmbedding(nn.Cell):
                 [-x[..., x.shape[-1] // 2:], x[..., : x.shape[-1] // 2]])  # (..., dim)
             return self.add(self.cos_mul(x, emb_cos), self.sin_mul(rotate_x, emb_sin))
 
+    def shard(self, dp, mp):
+        self.add.shard(((dp * mp, 1), (dp * mp, 1)))
+        self.add_3d.shard(((dp, mp, 1), (dp, mp, 1)))

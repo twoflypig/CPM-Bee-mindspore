@@ -130,3 +130,4 @@ class Encoder(nn.Cell):
     def shard(self, dp, mp):
         for cell in self.layers:
             cell.shard(dp, mp)
+        self.output_layernorm.shard(dp, mp)
