@@ -22,8 +22,7 @@ from mindspore import nn, ops
 from mindspore import Tensor
 from mindspore.common import dtype as mstype
 from mindspore.common.initializer import initializer, Normal, Constant
-from mindspore.communication.management import GlobalComm
-from mindspore.parallel._utils import _get_device_num, _get_gradients_mean
+from mindspore.common.parameter import Parameter
 
 from ..native_layers import Encoder, EmbeddingExt, BucketPositionBias, Linear, LayerNorm
 from ..utils import Config
@@ -302,6 +301,7 @@ class TrainOneStep(nn.TrainOneStepWithLossScaleCell):
     def __init__(self, network, optimizer, scale_sense, move_scaling_to_adam=True):
         super().__init__(network, optimizer, scale_sense)
         self.move_scaling_to_adam = move_scaling_to_adam
+        self.step = Parameter(Tensor(0, dtype=mstype.int32), name='step_count')
 
     def construct(self, *inputs):
         weights = self.weights
@@ -323,10 +323,11 @@ class TrainOneStep(nn.TrainOneStepWithLossScaleCell):
         if not overflow:
             if self.move_scaling_to_adam:
                 grads = clip_by_global_norm(grads, scaling_sens, 1.0)
-                loss = ops.depend(loss, self.optimizer(grads, scaling_sens))
+                loss = ops.depend(loss, self.optimizer(grads, scaling_sens, self.step))
             else:
                 grads = ops.clip_by_global_norm(grads, 1.0)
                 loss = ops.depend(loss, self.optimizer(grads))
+            self.step += 1
         return loss, cond, scaling_sens
 
 

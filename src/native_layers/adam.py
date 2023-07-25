@@ -96,12 +96,12 @@ class AdamWeightDecayWithScale(nn.AdamWeightDecay):
 
 
     @jit
-    def construct(self, gradients, scaling):
+    def construct(self, gradients, scaling, step):
         gradients = self.flatten_gradients(gradients)
         weight_decay = self.get_weight_decay()
         lr = self.get_lr()
-        bias1_correction = 1.0 - P.pow(self.beta1, self.global_step + 1)
-        bias2_correction = 1.0 - P.pow(self.beta2, self.global_step + 1)
+        bias1_correction = F.depend(1.0 - P.pow(self.beta1, step + 1), lr)
+        bias2_correction = F.depend(1.0 - P.pow(self.beta2, step + 1), lr)
 
         if self.is_group:
             if self.is_group_lr:
