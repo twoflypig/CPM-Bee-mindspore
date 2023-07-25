@@ -17,6 +17,7 @@ from src.lr_scheduler import Noam
 from src.models import CPMBeeConfig, CPMBee, BeeForward, TrainOneStep
 from src.native_layers.adam import AdamWeightDecayWithScale
 from src.create_cpm_dataset import create_mindrecord_dataset
+from ..native_layers.loss_scale_cell import DynamicLossScaleUpdateCell
 
 
 class LossCallBack(Callback):
@@ -284,10 +285,12 @@ def test_cpm_bee_cell():
     else:
         optimizer = nn.AdamWeightDecay(model.trainable_params(), lr_scheduler, weight_decay=0.01)
 
-    loss_scale_manager = DynamicLossScaleManager(32768)
+    loss_scale_update_cell = DynamicLossScaleUpdateCell(loss_scale_value=32768,
+                                                    scale_factor=2,
+                                                    scale_window=2000)
     loss_monitor = LossCallBack(1, lr=lr_scheduler)
 
-    train_step = TrainOneStep(model, optimizer, loss_scale_manager.get_update_cell(), move_scaling_to_adam=move_scaling_to_adam)
+    train_step = TrainOneStep(model, optimizer, loss_scale_update_cell, move_scaling_to_adam=move_scaling_to_adam)
     trainer = Model(train_step)
 
     trainer.train(epoch_size, dataset, callbacks=[loss_monitor], dataset_sink_mode=False)

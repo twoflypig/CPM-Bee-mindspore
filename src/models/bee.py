@@ -22,8 +22,8 @@ from mindspore import nn, ops
 from mindspore import Tensor
 from mindspore.common import dtype as mstype
 from mindspore.common.initializer import initializer, Normal, Constant
-from mindspore.communication.management import GlobalComm
-from mindspore.parallel._utils import _get_device_num, _get_gradients_mean
+from mindspore.ops import composite as C
+from mindspore.ops import functional as F
 
 from ..native_layers import Encoder, EmbeddingExt, BucketPositionBias, Linear, LayerNorm
 from ..utils import Config
@@ -297,11 +297,20 @@ class BeeForward(nn.Cell):
 
 from mindspore.nn.wrap.loss_scale import _grad_scale
 
+_state_rescale = C.MultitypeFuncGraph("state_rescale")
+
+@state_rescale.register("Tensor", "Tensor", "Tensor")
+def _state_rescale(scale, m, v):
+    F.assign(m, m * scale)
+    F.assign(v, v * scale)
+    return m
 
 class TrainOneStep(nn.TrainOneStepWithLossScaleCell):
     def __init__(self, network, optimizer, scale_sense, move_scaling_to_adam=True):
         super().__init__(network, optimizer, scale_sense)
         self.move_scaling_to_adam = move_scaling_to_adam
+
+        self.current_step = scale_sense.
 
     def construct(self, *inputs):
         weights = self.weights
@@ -318,7 +327,10 @@ class TrainOneStep(nn.TrainOneStepWithLossScaleCell):
 
         # get the overflow buffer
         cond = self.get_overflow_status(status, grads)
-        overflow = self.process_loss_scale(cond)
+        overflow, should_update_mv, rate = self.process_loss_scale(cond)
+
+        if should_update_mv:
+            self._rescale_mv(rate)
         # if there is no overflow, do optimize
         if not overflow:
             if self.move_scaling_to_adam:
@@ -328,6 +340,12 @@ class TrainOneStep(nn.TrainOneStepWithLossScaleCell):
                 grads = ops.clip_by_global_norm(grads, 1.0)
                 loss = ops.depend(loss, self.optimizer(grads))
         return loss, cond, scaling_sens
+
+    def _rescale_mv(self, rate):
+        
+        self.hyper_map(ops.partial(_state_rescale, rate), self.optimizer.moments1, self.optimizer.moments2)
+
+
 
 
 def init_weights(cell):
